@@ -1,0 +1,308 @@
+a---
+title: "Model Example"
+output: html_document
+---
+```{r}
+
+setwd("...")
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(topicmodels)
+library(tm)
+library(stm)
+library(wordcloud)
+library(data.table)
+library(dplyr)
+
+```
+```{r}
+## Ensure total is a data frame
+complete_data <- as.data.frame(complete_data)
+```
+
+```{r}
+complete_data %>% View()
+```
+
+## Model
+
+Model the STM for the entirety of the dataset.
+
+```{r preprocess whole data set for stm}
+# Converting to lower case, removing punctuation, removing stopwords, removing number, steeming, creating output
+
+processed <- textProcessor(complete_data$speech, metadata = complete_data)
+plotRemoved(processed$documents, lower.thresh = seq(1, 200, by = 100))
+out <- prepDocuments(processed$documents, processed$vocab, processed$meta,lower.thresh = 15)
+
+#Removing 89658 of 100181 terms (180240 of 5290673 tokens) due to frequency 
+#Removing 9 Documents with No Words 
+#Your corpus now has 67875 documents, 10523 terms and 5110433 tokens.
+
+```
+
+```{r output data}
+##Storing docs, vocab y meta for the whole dataset
+docs <- out$documents
+vocab <- out$vocab
+
+out$meta$party2 <- out$meta$party
+
+out$meta$party2[out$meta$party2=="R"]="R"
+out$meta$party2[out$meta$party2=="D"]="D"
+out$meta$party2[out$meta$party2=="I"]="D"
+out$meta$party2[out$meta$party2=="N"]="D"
+out$meta$party2[out$meta$party2=="P"]="D"
+out$meta$party2[out$meta$party2=="A"]="D"
+
+meta <-out$meta
+
+
+```
+
+```{r estimate first model}
+
+#Estimating the structural topic model
+congress_daily_fit <- stm(documents = out$documents, vocab = out$vocab,
+                          K = 30, prevalence = ~ gender.y + chamber.y + party2 + state.y + s(date),
+                          max.em.its = 5, data = out$meta,
+                          init.type = "Spectral")
+
+#Estimating effects for variable gender and date
+out$meta$gender.y <- as.factor(out$meta$gender.y)
+prep <- estimateEffect(1:20 ~ gender.y + chamber.y + party + state.y + s(date), congress_daily_fit,
+                       meta = out$meta, uncertainty = "Global")
+
+prep2 <- estimateEffect(1:30 ~ gender.y + chamber.y + party + state.y + s(date), congress_daily_fit,
+                       meta = out$meta, uncertainty = "Global")
+
+
+matrix(unlist(congress_daily_fit$beta["logbeta"][[1]])) %>% View()
+
+
+z <- congress_daily_fit$beta$logbeta
+
+output <- do.call(rbind,lapply(z,matrix,ncol=20,byrow=TRUE))
+output %>% View()
+output <- output %>% t()
+output %>% dim()
+
+output[1,1]
+
+```
+
+I estimate the model for 20 topics and observe the output. 
+```{r 20 topics total}
+labelTopics(congress_daily_fit, c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
+                                  21,22,23,24,25,26,27,28,29,30))
+
+```
+```{r}
+topic_numbers <- c(2, 7, 8, 9, 15, 18, 19, 20, 21, 23, 24,26, 27,29, 30)
+
+topic_titles <- c("Supreme Court", "Drugs and Crimes", "War/Iraq", "Natural Disasters", "Taxes", "Judicial Nominations",                         "Veterans", "Space/Energy", "Problematic IR", "Education/ Health/Women", "Agriculture/ Environment",  
+                  "Security", "Immigration", "Weapons", "Civil Rights")
+
+topic_df <- cbind(topic_numbers,topic_titles)
+```
+
+Get the most relevant document for a given topic:
+```{r example of documents of a given topic}
+###Example of 2 document related to health topic
+thoughts2 <- findThoughts(congress_daily_fit, texts = meta$speech,
+                              n = 1, topics = 2)$docs[[1]]
+
+thoughts2
+```
+
+```{r example of documents of a given topic2}
+###Example of 2 document related to traffick, victim, sex topic
+thoughts5 <- findThoughts(congress_daily_fit, texts = meta$speech,
+                               n = 1, topics = 5)$docs[[1]]
+
+thoughts5
+```
+
+```{r example of documents of a given topic3}
+###Example of 1 document related to topic 12 which makes no sense
+thoughts15 <- findThoughts(congress_daily_fit, texts = meta$speech,
+                           n = 1, topics = 15)$docs[[1]]
+
+thoughts15
+```
+
+```{r example of documents of a given topic4}
+###Example of 1 document related to topic 17 which makes no sense
+thoughts15 <- findThoughts(congress_daily_fit, texts = meta$speech,
+                           n = 1, topics = 15)$docs[[1]]
+
+thoughts15 
+```
+
+```{r example of documents of a given topic6}
+###Example documents highly associated with topics 16 and 20.
+par(mfrow = c(1, 2),mar = c(.5, .5, 1, .5))
+
+plotQuote(thoughts2, width = 30, main = "Topic 2: Supreme Court", maxwidth = 500)
+plotQuote(thoughts23, width = 30, main = "Topic 23: health/edu/women", maxwidth = 500)
+```
+
+```{r plot proportion of corpus that belongs to each topic}
+#Plot proportion of the corpus that belongs to each topic
+par(mfrow = c(1, 1))
+plot(congress_daily_fit, type = "summary", xlim = c(0, .3))
+```
+```{r wordclouds}
+#Wordcloud plot for each topic
+
+par(mfrow = c(4, 5))
+for (i in 1:30) {
+  cloud(congress_daily_fit, topic = i, scale = c(2,.25))
+}
+
+
+```
+
+```{r corr plot}
+
+##Plot correlations among topics
+par(mfrow = c(1, 1))
+mod.out.corr <- topicCorr(congress_daily_fit)
+plot(mod.out.corr)
+
+```
+
+```{r estimate effects}
+out$meta$gender.y <- as.factor(out$meta$gender.y)
+
+
+###observe effects
+summary(prep, topics=16) #
+summary(prep, topics=20) #
+summary(prep, topics=13) #
+summary(prep, topics=9)  #
+summary(prep, topics=8)  #
+summary(prep, topics=7)  # 
+
+```
+I now estimate a content base model
+
+```{r content based model}
+####Estimating content based, i reduced the max amount of iterations in order to speed up
+congress_content <- stm(out$documents, out$vocab, K = 20,
+                          prevalence =~ gender.y + s(date), content =~ gender.y,
+                          max.em.its = 20, data = out$meta, init.type = "Spectral")
+```
+
+This functions shows which words within a topic are more associated with one covariate value versus another.
+```{r content based model plots}
+#This functions shows which words within a topic are more associated with one covariate value
+#versus another.
+
+plot(congress_content, type = "perspectives", topics = 2)
+plot(congress_content, type = "perspectives", topics = 7)
+plot(congress_content, type = "perspectives", topics = 8)
+plot(congress_content, type = "perspectives", topics = 9)
+
+```
+Plot the contrast in words across two topics
+```{r content based model plots2}
+##plot the contrast in words across two topics.2
+plot(congress_daily_fit, type = "perspectives", topics = c(16, 17))
+```
+
+I now try a different approach and divide my corpus in documents where the speeaker are female and male
+
+```{r dividing the data}
+###I estimate the LDA only for data generated by female speakers
+complete_data <- as.data.table(complete_data)
+dta_female <- complete_data[gender.y=="F"]
+dta_male <- complete_data[gender.y=="M"]
+
+count_gender<-complete_data[,
+                    (count = uniqueN(speakerid))
+                    , by = (gender.y)]
+                    
+
+count_gender
+
+
+count_gender_chamber<-complete_data[,
+                    (count = uniqueN(speakerid))
+                    , by = list(gender.y, chamber.y)]
+
+count_gender_chamber
+
+dta_female  <- as.data.frame(dta_female)
+```
+
+
+```{r estimating model for female documents}
+dta_female <- as.data.frame(dta_female)
+processed_f <- textProcessor(dta_female$speech, metadata = dta_female)
+
+plotRemoved(processed_f$documents, lower.thresh = seq(1, 200, by = 100))
+
+out_f <- prepDocuments(processed_f$documents, processed_f$vocab, processed_f$meta,lower.thresh = 15)
+
+docs_f <- out_f$documents
+vocab_f <- out_f$vocab
+meta_f <-out_f$meta
+
+#Estimating the structural topic model
+
+congress_daily_fit_f <- stm(documents = out_f$documents, vocab = out_f$vocab,
+                          K = 20,
+                          max.em.its = 20, data = out_f$meta,
+                          init.type = "Spectral")
+
+```
+
+Topics btained from the corpus of documents generated by women speakers
+```{r topics for female documents}
+labelTopics(congress_daily_fit_f, c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20))
+
+```
+```{r plot proportion of corpus that belongs to each topic}
+#Plot proportion of the corpus that belongs to each topic
+plot(congress_daily_fit_f, type = "summary", xlim = c(0, .3))
+```
+
+```{r estimating model for male documents}
+dta_male<-as.data.frame(dta_male)
+processed_m <- textProcessor(dta_male$speech, metadata = dta_male)
+
+plotRemoved(processed_m$documents, lower.thresh = seq(1, 200, by = 100))
+
+out_m <- prepDocuments(processed_m$documents, processed_m$vocab, processed_m$meta,lower.thresh = 15)
+
+docs_m <- out_m$documents
+vocab_m <- out_m$vocab
+meta_m <-out_m$meta
+
+#Estimating the structural topic model
+
+congress_daily_fit_m <- stm(documents = out_m$documents, vocab = out_m$vocab,
+                            K = 20,
+                            max.em.its = 20, data = out_m$meta,
+                            init.type = "Spectral")
+```
+
+Male topics:
+```{r topics for male documents}
+labelTopics(congress_daily_fit_m, c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20))
+```
+Compare proportio of corpus for each topic when considering only female speeches, male speeches and all together
+
+```{r plots for female/male/total}
+#Plot proportion of the corpus that belongs to each topic
+plot(congress_daily_fit_f, type = "summary", xlim = c(0, .3))
+
+plot(congress_daily_fit_m, type = "summary", xlim = c(0, .3))
+
+plot(congress_daily_fit, type = "summary", xlim = c(0, .3))
+
+```     
